@@ -1,4 +1,3 @@
-# 自己处理好的数据集，已经划分好测试集，训练集，数据库集
 import torch
 import model
 import numpy as np
@@ -47,7 +46,7 @@ class CocoDataset(Dataset):
         tag = torch.from_numpy(self.tags[idx]).float()
         if self.transform:
             img = self.transform(img)
-        # vgg-f时才用到
+        # for vgg-f
         img = img * 255.0
 
         if self.one_stage_hash_code is not None:
@@ -81,7 +80,6 @@ def data_loader(path):
     # transformations = None
     # transformations = transforms.ToTensor()
 
-    # 路径（包括测试集，训练集，数据库集）
     img_q_path = 'cross_coco_demo/query/image_list.txt'
     label_q_path = 'cross_coco_demo/query/label.npy'
     tag_q_path = 'cross_coco_demo/query/tag.npy'
@@ -163,7 +161,7 @@ def train(test_loader, train_loader, database_loader, model_path, use_gpu):
             if use_gpu:
                 img, tag, label, B_temp = img.cuda(), tag.cuda(), label.cuda(), B_temp.cuda()
 
-            # 训练图片网络
+            # train img net
             cur_i, cur_i_l = img_net(img)
 
             S = CalcSim(label, label)
@@ -176,12 +174,12 @@ def train(test_loader, train_loader, database_loader, model_path, use_gpu):
             hashcode = torch.sign(cur_i.detach())
             S2 = (1 + hashcode.mm(hashcode.t())/conf.bit)/2
 
-            # WCE损失
+            # WCE loss
             theta_x = cur_i.mm(cur_i.t()) / 2
             log_x = Logtrick(theta_x, use_gpu)
 
             log_x1 = Logtrick(1-theta_x, use_gpu)
-            # 参数需要重新调整
+            # parameters need adjust
             gamma1 = 0.1
             gamma2 = 0.5
             logloss = (gamma1 * S1 * S * log_x + gamma2 * S2 * (1-S) * log_x1).sum() / (len(label) * len(label))
@@ -197,17 +195,17 @@ def train(test_loader, train_loader, database_loader, model_path, use_gpu):
             # cur_i_temp = cur_i.detach()
             del cur_i, cur_i_l
 
-            # 训练文本网络
+            # train txt net
             cur_t, cur_t_l = txt_net(tag)
 
-            # WCE损失
+            # WCE loss
             hashcode = torch.sign(cur_t.detach())
             S2 = (1 + hashcode.mm(hashcode.t()) / conf.bit)/2
             theta_y = cur_t.mm(cur_t.t()) / 2
             log_y = Logtrick(theta_y, use_gpu)
 
             log_y1 = Logtrick(1 - theta_y, use_gpu)
-            # 参数需要重新调整
+            # parameters need adjust
             gamma1 = 0.1
             gamma2 = 0.5
             logloss = (gamma1 * S1 * S * log_y + gamma2 * S2 * (1-S) * log_y1).sum() / (len(label) * len(label))
@@ -280,24 +278,22 @@ def calc_hammingDist(B1, B2):
     return distH
 
 
-# 计算mAP指标
 def Calculate_mAP(tst_label, tst_binary, db_label, db_binary, top_k=-1):
     if top_k == -1:
         top_k = db_binary.size(0)
     mAP = 0.
-    # 检索项的个数
     num_query = tst_binary.size(0)
     NS = (torch.arange(top_k) + 1).float()
     for idx in range(num_query):
         query_label = tst_label[idx].unsqueeze(0)
         query_binary = tst_binary[idx]
         result = query_label.mm(db_label.t()).squeeze(0) > 0
-        # 数据库中图片按照与查询项的相似性排序
+        # sort by similarity
         hamm = calc_hammingDist(query_binary, db_binary)
         _, index = hamm.sort()
         index.squeeze_()
         result = result[index[: top_k]].float()
-        # 数据库中与查询项有相同标签的图片数
+        
         tsum = torch.sum(result)
         if tsum == 0:
             continue
@@ -326,14 +322,13 @@ def generate_hash_code(dataloader, img_net, txt_net, use_gpu):
 
 if __name__ == '__main__':
     torch.multiprocessing.set_sharing_strategy('file_system')
-    print('读取数据')
+    print('reading data')
     train_hashcode_path = conf.one_stage_hashcode_path
     test_loader, train_loader, database_loader = data_loader(train_hashcode_path)
     use_gpu = torch.cuda.is_available()
 
-    # 注：11服务器设置0才是2号gpu
     if use_gpu:
         torch.cuda.set_device(3)
 
-    model_path = '/home/qjq/pretrain_model/imagenet-vgg-f.mat'
+    model_path = 'pretrain_model/imagenet-vgg-f.mat'
     train(test_loader, train_loader, database_loader, model_path, use_gpu)
